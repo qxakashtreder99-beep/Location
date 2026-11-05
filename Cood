@@ -1,0 +1,192 @@
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AZ Location Tracker</title>
+<style>
+body{background:#101827;color:white;font-family:Arial;padding:20px}
+.card{max-width:450px;margin:25px auto;background:#1c2940;
+padding:22px;border-radius:16px}
+h2{color:#35d6a0;text-align:center}
+input,button{width:100%;padding:13px;margin:8px 0;
+border-radius:8px;box-sizing:border-box}
+input{background:#fff;border:0}
+button{background:#16bd88;color:white;border:0;font-weight:bold}
+.hidden{display:none}
+.item{padding:12px;background:#293952;margin:10px 0;border-radius:8px}
+a{color:#35d6a0}
+</style>
+</head>
+<body>
+<div class="card">
+<h2>AZ LOCATION TRACKER</h2>
+
+<div id="home">
+<p>Admin Login</p>
+<input id="email" type="email" placeholder="Admin Email">
+<input id="password" type="password" placeholder="Admin Password">
+<button onclick="adminLogin()">ADMIN LOGIN</button>
+
+<hr>
+<p>Location Sharing</p>
+<button onclick="shareLocation()">SHARE MY LOCATION</button>
+<div id="shareStatus"></div>
+</div>
+
+<div id="admin" class="hidden">
+<h3>Admin Panel</h3>
+<button onclick="generateLink()">GENERATE LINK</button>
+<div id="newLink"></div>
+<button onclick="loadLocations()">REFRESH LOCATIONS</button>
+<div id="locations"></div>
+<button onclick="logout()">LOGOUT</button>
+</div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+
+<script>
+// Firebase Web App Configuration বসাও
+const firebaseConfig = {
+ apiKey: "YOUR_API_KEY",
+ authDomain: "YOUR_PROJECT.firebaseapp.com",
+ databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+ projectId: "YOUR_PROJECT",
+ appId: "YOUR_WEB_APP_ID"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth();
+const db=firebase.database();
+
+let currentToken=null;
+
+function adminLogin(){
+ const e=document.getElementById("email").value;
+ const p=document.getElementById("password").value;
+
+ auth.signInWithEmailAndPassword(e,p)
+ .then(()=>{
+ document.getElementById("home").classList.add("hidden");
+ document.getElementById("admin").classList.remove("hidden");
+ loadLocations();
+ })
+ .catch(err=>alert(err.message));
+}
+
+function generateLink(){
+ if(!auth.currentUser || auth.currentUser.isAnonymous){
+ alert("Admin login required");
+ return;
+ }
+
+ const token=crypto.randomUUID().replaceAll("-","");
+ db.ref("sessions/"+token).set({
+ status:"waiting",
+ createdAt:Date.now()
+ }).then(()=>{
+ const link=location.href.split("?")[0]+"?share="+token;
+ document.getElementById("newLink").innerHTML=
+ '<div class="item"><a href="'+link+'">'+link+
+ '</a><br><button onclick="copyLink(\''+link+'\')">COPY LINK</button></div>';
+ });
+}
+
+function copyLink(link){
+ navigator.clipboard.writeText(link)
+ .then(()=>alert("Link copied"));
+}
+
+async function shareLocation(){
+ const params=new URLSearchParams(location.search);
+ const token=params.get("share");
+
+ if(!token){
+ alert("Please open a valid sharing link");
+ return;
+ }
+
+ if(!navigator.geolocation){
+ alert("GPS is not supported");
+ return;
+ }
+
+ if(!confirm("আপনি কি নিজের বর্তমান লোকেশন Admin-এর সাথে শেয়ার করতে সম্মত?")){
+ return;
+ }
+
+ document.getElementById("shareStatus").innerText="Getting location...";
+
+ try{
+ await auth.signInAnonymously();
+
+ navigator.geolocation.getCurrentPosition(async pos=>{
+ const data={
+ latitude:pos.coords.latitude,
+ longitude:pos.coords.longitude,
+ accuracy:pos.coords.accuracy,
+ status:"shared",
+ sharedAt:Date.now()
+ };
+
+ try{
+ await db.ref("sessions/"+token).update(data);
+ document.getElementById("shareStatus").innerHTML=
+ 'Location shared! <a target="_blank" href="https://www.google.com/maps?q='+
+ data.latitude+','+data.longitude+'">View on Map</a>';
+ }catch(e){
+ document.getElementById("shareStatus").innerText=e.message;
+ }
+ },err=>{
+ document.getElementById("shareStatus").innerText=err.message;
+ },{enableHighAccuracy:true,timeout:20000});
+
+ }catch(e){
+ document.getElementById("shareStatus").innerText=e.message;
+ }
+}
+
+async function loadLocations(){
+ if(!auth.currentUser || auth.currentUser.isAnonymous)return;
+
+ try{
+ const snap=await db.ref("sessions").once("value");
+ const data=snap.val()||{};
+ const box=document.getElementById("locations");
+ box.innerHTML="";
+
+ Object.entries(data).forEach(([token,item])=>{
+ if(item.status!=="shared")return;
+
+ const url="https://www.google.com/maps?q="+
+ item.latitude+","+item.longitude;
+
+ box.innerHTML+=
+ '<div class="item"><b>Location Shared</b><br>'+
+ 'Latitude: '+item.latitude+'<br>'+
+ 'Longitude: '+item.longitude+'<br>'+
+ '<a target="_blank" href="'+url+'">OPEN GOOGLE MAP</a></div>';
+ });
+ }catch(e){
+ document.getElementById("locations").innerText=e.message;
+ }
+}
+
+function logout(){
+ auth.signOut().then(()=>location.href=location.href.split("?")[0]);
+}
+
+// Participant link automatically shows sharing interface
+if(new URLSearchParams(location.search).has("share")){
+ document.querySelector("#home p").innerText="Share your location";
+ document.getElementById("email").classList.add("hidden");
+ document.getElementById("password").classList.add("hidden");
+ document.querySelector("#home button").classList.add("hidden");
+}
+</script>
+</body>
+</html>
